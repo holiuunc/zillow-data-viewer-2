@@ -5,7 +5,10 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from pathlib import Path
+import io
+import streamlit as st
 
+@st.cache_data
 def load_json_data(file_path, max_records=None):
     """
     Load JSON data from file, handling large files and different formats
@@ -59,47 +62,60 @@ def load_json_data(file_path, max_records=None):
                         data = data[:max_records]
                     return data
         
-        # Standard handling for 2025 and other formats
+        # Standard handling for 2025 and other formats - read in chunks to reduce memory usage
         data = []
+        chunk_size = 100  # Process 100 records at a time
+        counter = 0
+        
         with open(file_path, 'r', encoding='utf-8') as f:
-            # Try to load the entire file first
-            try:
-                content = f.read()
-                # Check if the content starts with an array
-                if content.strip().startswith('['):
-                    data = json.loads(content)
-                    if max_records:
-                        data = data[:max_records]
-                else:
-                    # Try to parse each line as a separate JSON object
-                    f.seek(0)
-                    for i, line in enumerate(f):
-                        if max_records and i >= max_records:
-                            break
+            # Check if the file starts with an array
+            first_char = f.read(1).strip()
+            f.seek(0)
+            
+            if first_char == '[':
+                # JSON array format - read line by line
+                bracket_level = 0
+                current_object = ""
+                for line in f:
+                    current_object += line
+                    bracket_level += line.count('[') - line.count(']')
+                    bracket_level += line.count('{') - line.count('}')
+                    
+                    if bracket_level == 0 and current_object.strip():
                         try:
-                            line = line.strip()
-                            if line and not line in ['[', ']']:
-                                # Remove trailing comma if exists
-                                if line.endswith(','):
-                                    line = line[:-1]
-                                obj = json.loads(line)
+                            obj = json.loads(current_object)
+                            if isinstance(obj, list):
+                                # If we got a list, add all items
+                                data.extend(obj[:max_records-len(data)] if max_records else obj)
+                            else:
+                                # Single object
                                 data.append(obj)
+                            current_object = ""
+                            
+                            counter += 1
+                            if max_records and len(data) >= max_records:
+                                break
                         except json.JSONDecodeError:
-                            continue
-            except json.JSONDecodeError:
-                # If loading as a whole fails, try line-by-line approach
-                f.seek(0)
-                for i, line in enumerate(f):
-                    if max_records and i >= max_records:
-                        break
+                            # Continue collecting more lines
+                            pass
+            else:
+                # JSONL or line-by-line format
+                for line in f:
+                    line = line.strip()
+                    if not line or line in ['[', ']']:
+                        continue
+                    
+                    # Remove trailing comma if exists
+                    if line.endswith(','):
+                        line = line[:-1]
+                    
                     try:
-                        line = line.strip()
-                        if line and not line in ['[', ']']:
-                            # Remove trailing comma if exists
-                            if line.endswith(','):
-                                line = line[:-1]
-                            obj = json.loads(line)
-                            data.append(obj)
+                        obj = json.loads(line)
+                        data.append(obj)
+                        
+                        counter += 1
+                        if max_records and counter >= max_records:
+                            break
                     except json.JSONDecodeError:
                         continue
             
@@ -110,6 +126,7 @@ def load_json_data(file_path, max_records=None):
         print(f"Error loading data from {file_path}: {e}")
         return []
 
+@st.cache_data
 def load_multiple_json_files(file_paths, max_records=None):
     """
     Load data from multiple JSON files
@@ -147,6 +164,7 @@ def load_multiple_json_files(file_paths, max_records=None):
     
     return all_data
 
+@st.cache_data
 def extract_property_features(data_list, dataset_year=None):
     """
     Extract key attributes from the property data
@@ -200,79 +218,43 @@ def extract_property_features(data_list, dataset_year=None):
                 ('streetAddress', 'streetAddress'),
                 ('city', 'city'),
                 ('state', 'state'),
-                ('zipcode', 'zipcode'),
-                ('neighborhood', 'neighborhood')
+                ('zipcode', 'zipcode')
             ]:
                 if addr_field in address and prop_field not in property_data:
                     property_data[prop_field] = address.get(addr_field)
-            
-            # Tax info
-            tax_history = property_info.get('taxHistory', [])
-            if tax_history and isinstance(tax_history, list) and len(tax_history) > 0:
-                latest_tax = tax_history[0]
-                if isinstance(latest_tax, dict):
-                    property_data['taxPaid'] = latest_tax.get('taxPaid')
-                    property_data['taxValue'] = latest_tax.get('value')
-                    property_data['taxYear'] = latest_tax.get('year')
-            
-            # Price history
-            price_history = property_info.get('priceHistory', [])
-            if price_history and isinstance(price_history, list) and len(price_history) > 0:
-                latest_price = price_history[0]
-                if isinstance(latest_price, dict):
-                    property_data['lastSoldPrice'] = latest_price.get('price')
-                    property_data['lastSoldDate'] = latest_price.get('date')
         
-        # Handle nested address structure
-        elif 'address' in item and isinstance(item['address'], dict):
-            address = item.get('address', {})
+        # Handle alternate 2025 structure
+        if 'hdpData' in item:
+            hdp_data = item.get('hdpData', {})
+            home_info = hdp_data.get('homeInfo', {})
+            
+            # Basic property info
+            for field in ['zpid', 'price', 'bedrooms', 'bathrooms', 'livingArea', 'lotSize', 
+                         'yearBuilt', 'homeType', 'latitude', 'longitude']:
+                if field in home_info and field not in property_data:
+                    property_data[field] = home_info.get(field)
+            
+            # Address info
+            address = home_info.get('address', {})
             for addr_field, prop_field in [
                 ('streetAddress', 'streetAddress'),
                 ('city', 'city'),
                 ('state', 'state'),
-                ('zipcode', 'zipcode'),
-                ('neighborhood', 'neighborhood')
+                ('zipcode', 'zipcode')
             ]:
                 if addr_field in address and prop_field not in property_data:
                     property_data[prop_field] = address.get(addr_field)
-            
-        # Tax info
-        tax_history = item.get('taxHistory', [])
-        if tax_history and isinstance(tax_history, list) and len(tax_history) > 0:
-            latest_tax = tax_history[0]
-            if isinstance(latest_tax, dict):
-                property_data['taxPaid'] = latest_tax.get('taxPaid')
-                property_data['taxValue'] = latest_tax.get('value')
-                property_data['taxYear'] = latest_tax.get('year')
         
-        # Price history
-        price_history = item.get('priceHistory', [])
-        if price_history and isinstance(price_history, list) and len(price_history) > 0:
-            latest_price = price_history[0]
-            if isinstance(latest_price, dict):
-                property_data['lastSoldPrice'] = latest_price.get('price')
-                property_data['lastSoldDate'] = latest_price.get('date')
-        
-        # Ensure we have at least an ID field
-        if 'zpid' not in property_data and 'id' in property_data:
-            property_data['zpid'] = property_data['id']
-        
-        # Extract features from description if available
-        desc = str(property_data.get('description', '')).lower()
-        property_data['hasGarage'] = 'garage' in desc
-        property_data['hasParkingSpot'] = 'parking' in desc
-        property_data['hasPool'] = 'pool' in desc
-        property_data['hasAC'] = 'air conditioning' in desc or 'ac' in desc or ' ac ' in desc
-        
-        # Only append if we have some meaningful data
-        if property_data and ('zpid' in property_data or 'id' in property_data):
+        # Add property to list if we have at least some key information
+        if property_data.get('zpid') or property_data.get('id'):
             properties.append(property_data)
     
     return properties
 
+@st.cache_data
 def clean_dataframe(df):
     """
-    Clean and prepare the dataframe for analysis
+    Clean and preprocess property dataframe
     
     Parameters:
     -----------
@@ -284,45 +266,83 @@ def clean_dataframe(df):
     pandas.DataFrame
         Cleaned DataFrame
     """
-    # Ensure we have a zpid column, even if it's from the id column
-    if 'zpid' not in df.columns and 'id' in df.columns:
-        df['zpid'] = df['id']
+    if df is None or len(df) == 0:
+        return pd.DataFrame()
     
-    # Convert columns to appropriate types
-    numeric_cols = ['price', 'bedrooms', 'bathrooms', 'livingArea', 'lotSize', 
-                   'yearBuilt', 'taxPaid', 'taxValue', 'lastSoldPrice']
+    # Make a copy to avoid modifying the original
+    df = df.copy()
     
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    # Drop rows with missing critical values
-    critical_cols = [col for col in ['zpid', 'price'] if col in df.columns]
-    if critical_cols:
-        df = df.dropna(subset=critical_cols)
-    
-    # Clean up boolean columns
-    boolean_cols = ['hasGarage', 'hasParkingSpot', 'hasPool', 'hasAC']
-    for col in boolean_cols:
-        if col in df.columns:
-            df[col] = df[col].fillna(False)
-    
-    # Generate derived features
-    if 'price' in df.columns and 'livingArea' in df.columns:
-        mask = (df['livingArea'] > 0) & df['livingArea'].notna() & df['price'].notna()
-        df.loc[mask, 'pricePerSqFt'] = df.loc[mask, 'price'] / df.loc[mask, 'livingArea']
-    
-    if 'lastSoldDate' in df.columns:
-        df['lastSoldDate'] = pd.to_datetime(df['lastSoldDate'], errors='coerce')
-    
-    # Remove extreme outliers (properties with prices more than 3 standard deviations from mean)
+    # Ensure price is numeric and handle currency formatting
     if 'price' in df.columns:
-        mean_price = df['price'].mean()
-        std_price = df['price'].std()
-        df = df[(df['price'] > mean_price - 3*std_price) & (df['price'] < mean_price + 3*std_price)]
+        # Convert price to numeric, handling strings with currency symbols
+        df['price'] = df['price'].astype(str).str.replace('[\$,]', '', regex=True)
+        df['price'] = pd.to_numeric(df['price'], errors='coerce')
+        
+        # Remove properties with missing or zero prices
+        df = df[df['price'] > 0]
+    
+    # Convert area fields to numeric
+    for field in ['livingArea', 'lotSize']:
+        if field in df.columns:
+            df[field] = pd.to_numeric(df[field], errors='coerce')
+    
+    # Ensure bedrooms and bathrooms are numeric
+    for field in ['bedrooms', 'bathrooms']:
+        if field in df.columns:
+            df[field] = pd.to_numeric(df[field], errors='coerce')
+            
+            # Cap unrealistic values
+            max_value = 10 if field == 'bedrooms' else 8
+            df.loc[df[field] > max_value, field] = np.nan
+    
+    # Ensure year is numeric and within reasonable range
+    if 'yearBuilt' in df.columns:
+        df['yearBuilt'] = pd.to_numeric(df['yearBuilt'], errors='coerce')
+        df.loc[(df['yearBuilt'] < 1800) | (df['yearBuilt'] > 2025), 'yearBuilt'] = np.nan
+    
+    # Handle duplicate zpids by keeping the most complete record
+    if 'zpid' in df.columns:
+        # Count non-null values for each duplicate
+        if df['zpid'].duplicated().any():
+            # Create completeness score based on non-null values
+            completeness = df.notnull().sum(axis=1)
+            
+            # Sort by completeness (descending) and keep first of each duplicate
+            df = df.sort_values(by=completeness.name, ascending=False)
+            df = df.drop_duplicates(subset='zpid', keep='first')
+    
+    # Ensure all string columns are actually strings
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col] = df[col].astype(str)
+        df[col] = df[col].replace('nan', np.nan)
+    
+    # Create full address field
+    address_parts = []
+    for field in ['streetAddress', 'city', 'state', 'zipcode']:
+        if field in df.columns:
+            address_parts.append(df[field].fillna('').astype(str))
+    
+    if address_parts:
+        df['full_address'] = address_parts[0]
+        for part in address_parts[1:]:
+            df['full_address'] = df['full_address'] + ', ' + part
+        
+        # Clean up addresses
+        df['full_address'] = df['full_address'].str.replace(' , ', ', ', regex=False)
+        df['full_address'] = df['full_address'].str.replace(', , ', ', ', regex=False)
+        df['full_address'] = df['full_address'].str.replace('^, ', '', regex=True)
+        df['full_address'] = df['full_address'].str.replace(', $', '', regex=True)
+        
+        # Remove rows with empty addresses
+        df.loc[df['full_address'].str.strip() == '', 'full_address'] = np.nan
+    
+    # Drop rows that are missing critical data (price, location)
+    if 'price' in df.columns:
+        df = df.dropna(subset=['price'])
     
     return df
 
+@st.cache_data
 def process_zillow_data(data_paths_2023, data_paths_2025, max_records=5000, output_dir=None):
     """
     Process Zillow data from 2023 and 2025 datasets

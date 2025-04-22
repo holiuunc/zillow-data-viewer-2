@@ -1,81 +1,112 @@
 # Zillow Data Viewer
 
-A comprehensive interactive dashboard for exploring and analyzing Zillow property data from 2023 and 2025.
-
-## Overview
-
-The Zillow Data Viewer is a Streamlit-based application that allows users to visualize and analyze property data across different years. The application supports various visualizations including interactive maps, price trends, property comparisons, and market segment analysis.
+A Streamlit application for analyzing and visualizing Zillow property data from 2023 and 2025.
 
 ## Features
 
-- **Interactive Property Map**: Explore properties geographically with customizable filters and various map styles
-- **Price Trends Dashboard**: Analyze price changes by location and property type
-- **Property Time Comparison**: Compare properties that appear in both 2023 and 2025 datasets to track changes
-- **Property Feature Impact**: See how different features affect property values
-- **Market Segment Explorer**: Explore different segments of the housing market
-- **Neighborhood Comparison**: Compare statistics across different neighborhoods
+- Interactive property map visualization
+- Price trends dashboard
+- Property time comparison (properties appearing in both datasets)
+- Property feature impact analysis
+- Market segment explorer
+- Neighborhood comparison
+- Property attribute comparison
 
 ## Getting Started
 
 ### Prerequisites
 
-- Python 3.7+
-- pip (Python package installer)
+- Python 3.8 or higher
+- pip package manager
 
 ### Installation
 
-1. Unzip the project file or clone the repository
-2. Open a terminal/command prompt in the project directory
-3. Run the setup script:
+1. Clone this repository:
+   ```
+   git clone <repository-url>
+   cd zillow-data-viewer-2
+   ```
 
-```bash
-# On macOS/Linux
-bash run_app.sh
+2. Create and activate a virtual environment:
+   ```
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
 
-# On Windows
-run_app.bat
+3. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+### Running the Application
+
+You can run the application using the provided scripts:
+
+- On Linux/Mac:
+  ```
+  ./run_app.sh
+  ```
+
+- On Windows:
+  ```
+  run_app.bat
+  ```
+
+Alternatively, you can run it directly with:
 ```
-
-This will install the required dependencies and start the application.
-
-Alternatively, you can manually install dependencies and run the app:
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the application
 streamlit run app.py
 ```
 
-### Using Your Own Data
+## Data Sources
 
-The application accepts CSV files containing Zillow property data. To use your own data:
+The application can work with three types of data sources:
 
-1. Launch the application
-2. In the sidebar, select "Upload CSV Files"
-3. Upload your 2023 and/or 2025 dataset files
-4. The application will automatically process and display the data
+1. **Upload CSV Files**: Upload pre-processed CSV files with Zillow property data.
+2. **Use Sample Data**: Use pre-created sample datasets for quick testing.
+3. **Process Raw Data**: Process raw JSON data files from Zillow API.
 
-#### Required Data Format
+### Creating Sample Data
 
-Your CSV files should contain the following columns:
-- `zpid`: Zillow property ID (required for property matching)
-- `price`: Property price
-- `latitude` and `longitude`: Geographic coordinates
-- `bedrooms`, `bathrooms`, `livingArea`: Property characteristics
+You can create sample datasets using the provided script:
 
-Additional columns like `homeType`, `yearBuilt`, `city`, `state` will enhance available visualizations.
+```
+python create_sample_data.py --data-dir-2023 <path-to-2023-data> --data-dir-2025 <path-to-2025-data> --output-dir sample_data --sample-size 1000
+```
 
-## Navigation
+## Deploying to Streamlit Cloud
 
-Once data is loaded:
-1. Use the sidebar to select a visualization type
-2. Apply filters to customize the view
-3. Interact with the visualizations to explore insights
+To deploy this application to Streamlit Cloud, follow these steps:
 
-## Troubleshooting
+1. **Prepare Sample Data**: Create sample data files locally following the instructions in the [sample_data/README.md](sample_data/README.md) file.
 
-- If you encounter memory issues, try using smaller datasets or apply more restrictive filters
-- For CSV formatting issues, ensure your data includes the required columns and proper data types
-- For any other issues, check the error messages in the terminal where you launched the app 
+2. **Commit Sample Data to Repository**: Make sure to include the sample data files in your Git repository.
+
+3. **Create a GitHub Repository**: Push your code to a GitHub repository.
+
+4. **Deploy on Streamlit Cloud**:
+   - Go to [Streamlit Cloud](https://streamlit.io/cloud)
+   - Sign in with GitHub
+   - Select your repository
+   - Set the main file to `app.py`
+   - Click "Deploy"
+
+### Streamlit Cloud Limitations
+
+When running on Streamlit Cloud, be aware of these limitations:
+
+1. **Memory Limits**: Streamlit Cloud has memory limitations (~1GB), so processing large JSON files may fail.
+   - Use the "Upload CSV Files" option or pre-created sample data instead.
+
+2. **File Storage**: Files created during a session are not persistent between runs.
+   - Include your sample data files in the Git repository.
+
+3. **Processing Power**: Limited CPU resources mean complex operations may be slower.
+   - Keep sample sizes reasonable (1000-5000 properties recommended).
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 
