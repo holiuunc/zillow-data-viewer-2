@@ -7,15 +7,6 @@ from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Try to import scikit-learn modules, but provide fallbacks if not available
-sklearn_available = True
-try:
-    from sklearn.linear_model import LinearRegression
-    from sklearn.preprocessing import StandardScaler
-except ImportError:
-    sklearn_available = False
-    st.warning("scikit-learn is not available. Some advanced analysis features will be disabled.")
-
 def display_feature_impact(df_2023, df_2025, df_combined):
     """
     Display feature impact analysis dashboard
@@ -147,11 +138,7 @@ def display_feature_impact(df_2023, df_2025, df_combined):
         return
     
     # Main dashboard tabs
-    tabs = ["Price Correlations", "Feature Analysis"]
-    if sklearn_available:
-        tabs.extend(["Price Predictors", "Geographic Impact"])
-    
-    selected_tabs = st.tabs(tabs)
+    selected_tabs = st.tabs(["Price Correlations", "Feature Analysis", "Geographic Analysis"])
     
     # Tab 1: Price Correlations
     with selected_tabs[0]:
@@ -247,6 +234,28 @@ def display_feature_impact(df_2023, df_2025, df_combined):
                 st.markdown("### Feature Statistics")
                 st.dataframe(stats_df.style.format("{:.2f}"))
                 
+                # Calculate simple price impact using quartiles
+                try:
+                    q1 = df[selected_feature].quantile(0.25)
+                    q3 = df[selected_feature].quantile(0.75)
+                    
+                    low_group = df[(df[selected_feature] <= q1) & df[selected_feature].notna()]
+                    high_group = df[(df[selected_feature] >= q3) & df[selected_feature].notna()]
+                    
+                    if len(low_group) > 5 and len(high_group) > 5:
+                        low_price = low_group['price'].mean()
+                        high_price = high_group['price'].mean()
+                        price_diff = high_price - low_price
+                        pct_diff = (price_diff / low_price) * 100 if low_price > 0 else 0
+                        
+                        st.markdown("### Price Impact Analysis")
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric(f"Bottom 25% {selected_feature}", f"${low_price:,.0f}")
+                        col2.metric(f"Top 25% {selected_feature}", f"${high_price:,.0f}")
+                        col3.metric("Price Difference", f"${price_diff:,.0f}", f"{pct_diff:.1f}%")
+                except Exception as e:
+                    pass  # Silently skip if this analysis fails
+                
                 # Bin analysis - group by feature bins and show average price
                 if len(df) > 20:  # Only if we have enough data
                     st.markdown("### Average Price by Feature Bins")
@@ -301,230 +310,104 @@ def display_feature_impact(df_2023, df_2025, df_combined):
             except Exception as e:
                 st.error(f"Error analyzing feature: {str(e)}")
     
-    # Only show ML-related tabs if scikit-learn is available
-    if sklearn_available and len(selected_tabs) > 2:
-        # Tab 3: Price Predictors
-        with selected_tabs[2]:
-            st.markdown("### Feature Importance in Price Prediction")
-            
-            if len(numeric_features) < 2:
-                st.warning("Need at least 2 numeric features for price prediction analysis.")
-            else:
-                try:
-                    # Get valid features for regression model
-                    features_for_model = [
-                        f for f in numeric_features 
-                        if df[f].notna().sum() > 0.7 * len(df)  # Require at least 70% non-null
-                    ]
-                    
-                    if len(features_for_model) < 2:
-                        st.warning("Not enough features with sufficient data for modeling.")
-                    else:
-                        # Prepare data for modeling
-                        model_df = df[features_for_model + ['price']].dropna()
-                        
-                        if len(model_df) < 50:  # Need reasonable amount of data
-                            st.warning("Not enough data points for reliable modeling after removing nulls.")
-                        else:
-                            X = model_df[features_for_model]
-                            y = model_df['price']
-                            
-                            # Standardize features
-                            scaler = StandardScaler()
-                            X_scaled = scaler.fit_transform(X)
-                            
-                            # Fit linear model
-                            model = LinearRegression()
-                            model.fit(X_scaled, y)
-                            
-                            # Get feature importance (use absolute coefficients)
-                            importance = pd.DataFrame({
-                                'Feature': features_for_model,
-                                'Importance': np.abs(model.coef_)
-                            })
-                            
-                            # Sort by importance
-                            importance = importance.sort_values('Importance', ascending=False)
-                            
-                            # Plot importance
-                            fig = px.bar(
-                                importance,
-                                x='Feature',
-                                y='Importance',
-                                title="Feature Importance in Price Prediction",
-                                labels={
-                                    'Feature': 'Property Feature',
-                                    'Importance': 'Absolute Importance'
-                                },
-                                color='Importance'
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                            
-                            # Model performance
-                            y_pred = model.predict(X_scaled)
-                            r2 = np.corrcoef(y, y_pred)[0, 1]**2
-                            
-                            st.metric("Model R² (higher is better)", f"{r2:.3f}")
-                            
-                            # Show scatter plot of predicted vs actual
-                            fig = px.scatter(
-                                x=y,
-                                y=y_pred,
-                                labels={'x': 'Actual Price', 'y': 'Predicted Price'},
-                                title="Predicted vs. Actual Prices",
-                                opacity=0.7
-                            )
-                            
-                            # Add 45-degree line
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=[y.min(), y.max()],
-                                    y=[y.min(), y.max()],
-                                    mode='lines',
-                                    line=dict(color='red', dash='dash'),
-                                    name='Perfect Prediction'
-                                )
-                            )
-                            
-                            st.plotly_chart(fig, use_container_width=True)
-                            
-                            # Feature coefficient table with context
-                            coef_df = pd.DataFrame({
-                                'Feature': features_for_model,
-                                'Coefficient': model.coef_
-                            })
-                            
-                            # Add average feature values
-                            for feature in features_for_model:
-                                coef_df.loc[coef_df['Feature'] == feature, 'Avg Value'] = model_df[feature].mean()
-                            
-                            # Sort by absolute coefficient
-                            coef_df['Abs Coefficient'] = np.abs(coef_df['Coefficient'])
-                            coef_df = coef_df.sort_values('Abs Coefficient', ascending=False)
-                            coef_df = coef_df.drop('Abs Coefficient', axis=1)
-                            
-                            # Calculate price impact of one standard deviation change
-                            for feature in features_for_model:
-                                std_dev = model_df[feature].std()
-                                idx = coef_df[coef_df['Feature'] == feature].index[0]
-                                coef_df.loc[idx, 'StdDev'] = std_dev
-                                coef_df.loc[idx, 'Price Impact ($)'] = coef_df.loc[idx, 'Coefficient'] * std_dev
-                            
-                            # Format the table
-                            coef_df = coef_df[['Feature', 'Coefficient', 'StdDev', 'Price Impact ($)', 'Avg Value']]
-                            
-                            st.markdown("### Feature Impact on Price")
-                            st.markdown("This table shows how much each feature affects the price. " +
-                                       "The 'Price Impact' column shows the expected price change when the " +
-                                       "feature increases by one standard deviation.")
-                            
-                            st.dataframe(coef_df.style.format({
-                                'Coefficient': '{:,.2f}',
-                                'StdDev': '{:,.2f}',
-                                'Price Impact ($)': '{:,.2f}',
-                                'Avg Value': '{:,.2f}'
-                            }))
-                except Exception as e:
-                    st.error(f"Error building price prediction model: {str(e)}")
+    # Tab 3: Geographic Analysis
+    with selected_tabs[2]:
+        st.markdown("### Geographic Impact on Prices")
         
-        # Tab 4: Geographic Impact
-        with selected_tabs[3]:
-            st.markdown("### Geographic Impact on Prices")
+        if 'latitude' not in df.columns or 'longitude' not in df.columns:
+            st.warning("Location data (latitude/longitude) not found in the dataset.")
+        else:
+            # Check if we have sufficient location data
+            location_df = df.dropna(subset=['latitude', 'longitude', 'price'])
             
-            if 'latitude' not in df.columns or 'longitude' not in df.columns:
-                st.warning("Location data (latitude/longitude) not found in the dataset.")
+            if len(location_df) < 20:
+                st.warning("Not enough properties with location data for geographic analysis.")
             else:
-                # Check if we have sufficient location data
-                location_df = df.dropna(subset=['latitude', 'longitude', 'price'])
+                # Scatter plot on map
+                fig = px.scatter_mapbox(
+                    location_df,
+                    lat='latitude',
+                    lon='longitude',
+                    color='price',
+                    size='price',
+                    color_continuous_scale=px.colors.sequential.Plasma,
+                    size_max=15,
+                    zoom=10,
+                    mapbox_style="open-street-map",
+                    title="Property Prices by Location",
+                    opacity=0.7
+                )
                 
-                if len(location_df) < 20:
-                    st.warning("Not enough properties with location data for geographic analysis.")
-                else:
-                    # Scatter plot on map
-                    fig = px.scatter_mapbox(
-                        location_df,
-                        lat='latitude',
-                        lon='longitude',
-                        color='price',
-                        size='price',
-                        color_continuous_scale=px.colors.sequential.Plasma,
-                        size_max=15,
-                        zoom=10,
-                        mapbox_style="open-street-map",
-                        title="Property Prices by Location",
-                        opacity=0.7
-                    )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Group by location (using city if available)
+                if 'city' in df.columns and df['city'].notna().sum() > 0.5 * len(df):
+                    st.markdown("### Price by City")
                     
-                    st.plotly_chart(fig, use_container_width=True)
+                    city_df = df.groupby('city').agg(
+                        avg_price=('price', 'mean'),
+                        median_price=('price', 'median'),
+                        count=('price', 'count')
+                    ).reset_index()
                     
-                    # Group by location (using city if available)
-                    if 'city' in df.columns and df['city'].notna().sum() > 0.5 * len(df):
-                        st.markdown("### Price by City")
-                        
-                        city_df = df.groupby('city').agg(
-                            avg_price=('price', 'mean'),
-                            median_price=('price', 'median'),
-                            count=('price', 'count')
-                        ).reset_index()
-                        
-                        # Filter to cities with enough properties
-                        city_df = city_df[city_df['count'] >= 5].sort_values('avg_price', ascending=False)
-                        
-                        if len(city_df) > 0:
-                            fig = px.bar(
-                                city_df,
-                                x='city',
-                                y='avg_price',
-                                title="Average Price by City",
-                                labels={
-                                    'city': 'City',
-                                    'avg_price': 'Average Price ($)'
-                                },
-                                text='count',
-                                color='avg_price'
-                            )
-                            
-                            fig.update_traces(
-                                hovertemplate='%{x}<br>Average Price: $%{y:,.0f}<br>Count: %{text}'
-                            )
-                            
-                            st.plotly_chart(fig, use_container_width=True)
-                        else:
-                            st.warning("Not enough cities with sufficient data for comparison.")
+                    # Filter to cities with enough properties
+                    city_df = city_df[city_df['count'] >= 5].sort_values('avg_price', ascending=False)
                     
-                    # Try to use zip code if available and city isn't
-                    elif 'zipcode' in df.columns and df['zipcode'].notna().sum() > 0.5 * len(df):
-                        st.markdown("### Price by ZIP Code")
+                    if len(city_df) > 0:
+                        fig = px.bar(
+                            city_df,
+                            x='city',
+                            y='avg_price',
+                            title="Average Price by City",
+                            labels={
+                                'city': 'City',
+                                'avg_price': 'Average Price ($)'
+                            },
+                            text='count',
+                            color='avg_price'
+                        )
                         
-                        zip_df = df.groupby('zipcode').agg(
-                            avg_price=('price', 'mean'),
-                            median_price=('price', 'median'),
-                            count=('price', 'count')
-                        ).reset_index()
+                        fig.update_traces(
+                            hovertemplate='%{x}<br>Average Price: $%{y:,.0f}<br>Count: %{text}'
+                        )
                         
-                        # Filter to zip codes with enough properties
-                        zip_df = zip_df[zip_df['count'] >= 5].sort_values('avg_price', ascending=False)
-                        
-                        if len(zip_df) > 0:
-                            fig = px.bar(
-                                zip_df,
-                                x='zipcode',
-                                y='avg_price',
-                                title="Average Price by ZIP Code",
-                                labels={
-                                    'zipcode': 'ZIP Code',
-                                    'avg_price': 'Average Price ($)'
-                                },
-                                text='count',
-                                color='avg_price'
-                            )
-                            
-                            fig.update_traces(
-                                hovertemplate='%{x}<br>Average Price: $%{y:,.0f}<br>Count: %{text}'
-                            )
-                            
-                            st.plotly_chart(fig, use_container_width=True)
-                        else:
-                            st.warning("Not enough ZIP codes with sufficient data for comparison.")
+                        st.plotly_chart(fig, use_container_width=True)
                     else:
-                        st.info("No city or ZIP code information found for location-based comparison.") 
+                        st.warning("Not enough cities with sufficient data for comparison.")
+                
+                # Try to use zip code if available and city isn't
+                elif 'zipcode' in df.columns and df['zipcode'].notna().sum() > 0.5 * len(df):
+                    st.markdown("### Price by ZIP Code")
+                    
+                    zip_df = df.groupby('zipcode').agg(
+                        avg_price=('price', 'mean'),
+                        median_price=('price', 'median'),
+                        count=('price', 'count')
+                    ).reset_index()
+                    
+                    # Filter to zip codes with enough properties
+                    zip_df = zip_df[zip_df['count'] >= 5].sort_values('avg_price', ascending=False)
+                    
+                    if len(zip_df) > 0:
+                        fig = px.bar(
+                            zip_df,
+                            x='zipcode',
+                            y='avg_price',
+                            title="Average Price by ZIP Code",
+                            labels={
+                                'zipcode': 'ZIP Code',
+                                'avg_price': 'Average Price ($)'
+                            },
+                            text='count',
+                            color='avg_price'
+                        )
+                        
+                        fig.update_traces(
+                            hovertemplate='%{x}<br>Average Price: $%{y:,.0f}<br>Count: %{text}'
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning("Not enough ZIP codes with sufficient data for comparison.")
+                else:
+                    st.info("No city or ZIP code information found for location-based comparison.") 
