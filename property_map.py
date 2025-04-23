@@ -305,11 +305,7 @@ def display_property_map(df_2023, df_2025, df_combined):
                     valid_price_df['price_change_formatted'] = valid_price_df['price_change_pct'].map(lambda x: f"{x:+.1f}%" if pd.notna(x) else "N/A")
                     
                     # Set range to make 0 the center
-                    max_abs_pct = max(
-                        abs(valid_price_df['price_change_pct'].min() if not pd.isna(valid_price_df['price_change_pct'].min()) else 0),
-                        abs(valid_price_df['price_change_pct'].max() if not pd.isna(valid_price_df['price_change_pct'].max()) else 0)
-                    )
-                    color_range = [-max_abs_pct, max_abs_pct]
+                    color_range = [-100, 100] # Fixed range for better visualization
                     
                     hover_data = {
                         'price': ':$,.0f',
