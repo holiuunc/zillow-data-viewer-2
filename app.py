@@ -70,7 +70,6 @@ data_source = st.sidebar.radio(
 # Initialize dataframes
 df_2023 = None
 df_2025 = None
-df_combined = None
 
 if data_source == "Upload CSV Files":
     st.sidebar.markdown("#### Upload processed Zillow data files")
@@ -124,20 +123,29 @@ elif data_source == "Use Sample Data":
         else:
             load_sample = st.sidebar.button("Load Sample Data")
             
+            if 'df_2023' not in st.session_state:
+                st.session_state.df_2023 = None
+            if 'df_2025' not in st.session_state:
+                st.session_state.df_2025 = None
+                
             if load_sample:
                 if has_2023_sample:
-                    df_2023 = load_data(sample_2023)
-                    if df_2023 is not None:
-                        st.sidebar.success(f"Loaded 2023 sample: {len(df_2023)} properties")
+                    st.session_state.df_2023 = load_data(sample_2023)
+                    if st.session_state.df_2023 is not None:
+                        st.sidebar.success(f"Loaded 2023 sample: {len(st.session_state.df_2023)} properties")
                 else:
                     st.sidebar.warning(f"Sample file not found: {sample_2023}")
                     
                 if has_2025_sample:
-                    df_2025 = load_data(sample_2025)
-                    if df_2025 is not None:
-                        st.sidebar.success(f"Loaded 2025 sample: {len(df_2025)} properties")
+                    st.session_state.df_2025 = load_data(sample_2025)
+                    if st.session_state.df_2025 is not None:
+                        st.sidebar.success(f"Loaded 2025 sample: {len(st.session_state.df_2025)} properties")
                 else:
                     st.sidebar.warning(f"Sample file not found: {sample_2025}")
+            
+            # Use session state data if available
+            df_2023 = st.session_state.df_2023
+            df_2025 = st.session_state.df_2025
 
 elif data_source == "Process Raw Data":
     st.sidebar.markdown("#### Process Raw Zillow Data")
@@ -214,26 +222,34 @@ elif data_source == "Process Raw Data":
         st.sidebar.info("Please upload JSON files to process.")
 
 # Create combined dataset if both are loaded and not already combined
-if df_2023 is not None and df_2025 is not None and df_combined is None:
+if 'df_combined' not in st.session_state:
+    st.session_state.df_combined = None
+
+if df_2023 is not None and df_2025 is not None and st.session_state.df_combined is None:
     try:
         # Make sure both have a dataset_year column
-        if 'dataset_year' not in df_2023.columns:
-            df_2023['dataset_year'] = 2023
-        if 'dataset_year' not in df_2025.columns:
-            df_2025['dataset_year'] = 2025
+        df_2023_copy = df_2023.copy()
+        df_2025_copy = df_2025.copy()
+        
+        if 'dataset_year' not in df_2023_copy.columns:
+            df_2023_copy['dataset_year'] = 2023
+        if 'dataset_year' not in df_2025_copy.columns:
+            df_2025_copy['dataset_year'] = 2025
         
         # Find common columns
-        common_cols = list(set(df_2023.columns) & set(df_2025.columns))
+        common_cols = list(set(df_2023_copy.columns) & set(df_2025_copy.columns))
         
         # Combine datasets
-        df_combined = pd.concat([
-            df_2023[common_cols], 
-            df_2025[common_cols]
+        st.session_state.df_combined = pd.concat([
+            df_2023_copy[common_cols], 
+            df_2025_copy[common_cols]
         ], ignore_index=True)
         
-        st.sidebar.success(f"Created combined dataset with {len(df_combined)} properties")
+        st.sidebar.success(f"Created combined dataset with {len(st.session_state.df_combined)} properties")
     except Exception as e:
         st.sidebar.error(f"Error creating combined dataset: {e}")
+
+df_combined = st.session_state.df_combined
 
 # Visualization selection
 st.sidebar.header("Select Visualization")
